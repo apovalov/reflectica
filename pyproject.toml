@@ -1,0 +1,22 @@
+[project]
+name = "mindforms-diary-bot"
+version = "0.1.0"
+description = "Telegram bot for multimodal diary entries with Gemini AI processing"
+requires-python = ">=3.12"
+dependencies = [
+    "aiogram==3.13.1",
+    "sqlalchemy==2.0.36",
+    "alembic==1.14.0",
+    "psycopg[binary]==3.2.3",
+    "boto3==1.35.47",
+    "celery==5.4.0",
+    "redis==5.2.0",
+    "google-genai==0.2.2",
+    "python-dotenv==1.0.1",
+    "pillow==11.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
