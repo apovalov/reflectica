@@ -1,4 +1,5 @@
 """Telegram bot handlers."""
+import json
 import os
 import uuid
 from datetime import datetime
@@ -31,6 +32,11 @@ def get_pending_type_key(telegram_user_id: int) -> str:
     return f"pending_type:{telegram_user_id}"
 
 
+def get_pending_message_key(telegram_user_id: int) -> str:
+    """Get Redis key for pending message data."""
+    return f"pending_message:{telegram_user_id}"
+
+
 def set_pending_type(telegram_user_id: int, event_type: str, ttl: int = 3600):
     """Set pending event type in Redis."""
     redis_client.setex(get_pending_type_key(telegram_user_id), ttl, event_type)
@@ -45,6 +51,28 @@ def get_pending_type(telegram_user_id: int) -> str | None:
 def clear_pending_type(telegram_user_id: int):
     """Clear pending event type from Redis."""
     redis_client.delete(get_pending_type_key(telegram_user_id))
+
+
+def save_pending_message(telegram_user_id: int, message_data: dict, ttl: int = 600):
+    """Save pending message data in Redis."""
+    redis_client.setex(
+        get_pending_message_key(telegram_user_id),
+        ttl,
+        json.dumps(message_data)
+    )
+
+
+def get_pending_message(telegram_user_id: int) -> dict | None:
+    """Get pending message data from Redis."""
+    result = redis_client.get(get_pending_message_key(telegram_user_id))
+    if result:
+        return json.loads(result.decode())
+    return None
+
+
+def clear_pending_message(telegram_user_id: int):
+    """Clear pending message data from Redis."""
+    redis_client.delete(get_pending_message_key(telegram_user_id))
 
 
 async def get_or_create_user(telegram_user_id: int, session) -> User:
@@ -290,19 +318,111 @@ async def callback_set_type(callback: CallbackQuery):
     set_pending_type(callback.from_user.id, event_type)
     await callback.answer(f"Type set to {event_type}")
 
-    # Check if this is a confirmation after auto-classification
-    # If the message contains "I think this is", it's an auto-classification confirmation
-    if "I think this is" in callback.message.text or "Analyzing" in callback.message.text:
+    # Check if there's a pending message to process
+    pending_msg = get_pending_message(callback.from_user.id)
+
+    if pending_msg and pending_msg.get("type") == "photo":
+        # Process the saved photo
+        clear_pending_message(callback.from_user.id)
+
         await callback.message.edit_text(
-            f"✅ Confirmed as <b>{event_type}</b>!\n"
-            f"Please send your content again to save it.",
+            f"✅ Processing as <b>{event_type}</b>...",
             parse_mode="HTML",
         )
+
+        try:
+            # Download the photo
+            file = await callback.bot.get_file(pending_msg["file_id"])
+            file_content = await callback.bot.download_file(file.file_path)
+            temp_file = download_file_to_temp(
+                f"photo_{pending_msg['file_id']}.jpg", file_content.read()
+            )
+
+            # Upload to MinIO and create event
+            storage = MinIOClient()
+            session = get_session().__enter__()
+            try:
+                user = await get_or_create_user(callback.from_user.id, session)
+                user_tz = get_user_timezone(user.timezone)
+                now_utc = datetime.now(ZoneInfo("UTC"))
+                local_date = get_local_date(now_utc, user_tz)
+
+                event_id = str(uuid.uuid4())
+                s3_key = storage.generate_s3_key(
+                    callback.from_user.id, event_id, f"photo_{event_id}.jpg", now_utc
+                )
+                storage.upload_file(temp_file, s3_key, "image/jpeg")
+
+                # Create a minimal message-like object for create_event_from_message
+                class FakeMessage:
+                    def __init__(self, user_id, chat_id, message_id):
+                        self.from_user = type('obj', (object,), {'id': user_id})()
+                        self.chat = type('obj', (object,), {'id': chat_id})()
+                        self.message_id = message_id
+
+                fake_msg = FakeMessage(
+                    callback.from_user.id,
+                    pending_msg["chat_id"],
+                    pending_msg["message_id"]
+                )
+
+                event = await create_event_from_message(
+                    fake_msg,
+                    event_type,
+                    "photo",
+                    s3_key=s3_key,
+                    mime_type="image/jpeg",
+                    file_meta={
+                        "file_id": pending_msg["file_id"],
+                        "file_size": pending_msg["file_size"],
+                        "width": pending_msg["width"],
+                        "height": pending_msg["height"],
+                    },
+                )
+
+                # Enqueue processing task based on type
+                if event_type == "mindform":
+                    ocr_handwriting_task.delay(str(event.id))
+                    await callback.message.edit_text(
+                        f"✅ Photo saved as <b>{event_type}</b>!\n🔄 Extracting text...",
+                        parse_mode="HTML",
+                    )
+                elif event_type == "face_photo":
+                    analyze_face_task.delay(str(event.id))
+                    await callback.message.edit_text(
+                        f"✅ Photo saved as <b>{event_type}</b>!\n🔄 Analyzing face...",
+                        parse_mode="HTML",
+                    )
+                else:
+                    await callback.message.edit_text(
+                        f"✅ Photo saved as <b>{event_type}</b>!",
+                        parse_mode="HTML",
+                    )
+            finally:
+                session.close()
+
+            # Cleanup temp file
+            if temp_file.exists():
+                temp_file.unlink()
+        except Exception as e:
+            logger.error(f"Error processing saved photo: {e}", exc_info=True)
+            await callback.message.edit_text(
+                "❌ Error processing photo. Please try sending it again.",
+                parse_mode="HTML",
+            )
     else:
-        await callback.message.edit_text(
-            f"✅ Type set to <b>{event_type}</b>. Please send your content now.",
-            parse_mode="HTML",
-        )
+        # No pending message or not a photo, just confirmation
+        if "I think this is" in callback.message.text or "Analyzing" in callback.message.text:
+            await callback.message.edit_text(
+                f"✅ Confirmed as <b>{event_type}</b>!\n"
+                f"Please send your content again to save it.",
+                parse_mode="HTML",
+            )
+        else:
+            await callback.message.edit_text(
+                f"✅ Type set to <b>{event_type}</b>. Please send your content now.",
+                parse_mode="HTML",
+            )
 
 
 @router.callback_query(F.data.startswith("add_"))
@@ -468,6 +588,20 @@ async def handle_photo(message: Message):
 
             # If confidence is low, ask for confirmation
             if classification["confidence"] < 0.6:
+                # Save photo info for later processing
+                photo: PhotoSize = max(message.photo, key=lambda p: p.file_size)
+                save_pending_message(
+                    message.from_user.id,
+                    {
+                        "type": "photo",
+                        "file_id": photo.file_id,
+                        "file_size": photo.file_size,
+                        "width": photo.width,
+                        "height": photo.height,
+                        "message_id": message.message_id,
+                        "chat_id": message.chat.id,
+                    }
+                )
                 await message.answer(
                     f"I think this is a <b>{pending_type}</b> (confidence: {classification['confidence']:.0%}).\n"
                     f"Is this correct?",
