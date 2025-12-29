@@ -4,6 +4,7 @@ import os
 import sys
 
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from dotenv import load_dotenv
 
@@ -22,7 +23,11 @@ async def main():
         sys.exit(1)
 
     # Create bot and dispatcher
-    bot = Bot(token=bot_token, parse_mode=ParseMode.HTML)
+    # aiogram 3.7.0+ requires DefaultBotProperties for parse_mode
+    bot = Bot(
+        token=bot_token,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+    )
     dp = Dispatcher()
 
     # Register router

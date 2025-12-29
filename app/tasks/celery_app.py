@@ -22,7 +22,8 @@ celery_app.conf.update(
     task_soft_time_limit=240,  # 4 minutes
 )
 
-# Import tasks and beat schedule
-from app.tasks import processing, reminders  # noqa: E402, F401
-from app.scheduler import beat_schedule  # noqa: E402, F401
+# Import tasks and beat schedule after celery_app is created
+# With lazy database initialization, imports are safe even if DB isn't ready yet
+from app.tasks import processing, reminders  # noqa: F401
+from app.scheduler import beat_schedule  # noqa: F401
 

@@ -5,6 +5,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot
+from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -26,7 +27,10 @@ async def _send_reminders_async():
             logger.error("TELEGRAM_BOT_TOKEN not set")
             return
 
-        bot = Bot(token=bot_token, parse_mode=ParseMode.HTML)
+        bot = Bot(
+            token=bot_token,
+            default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+        )
 
         # Get all users
         users = session.query(User).all()

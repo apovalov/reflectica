@@ -14,7 +14,8 @@ from app.db.session import DATABASE_URL
 config = context.config
 
 # Override sqlalchemy.url with environment variable
-config.set_main_option("sqlalchemy.url", DATABASE_URL.replace("postgresql+psycopg://", "postgresql://"))
+# Keep postgresql+psycopg:// format for psycopg v3
+config.set_main_option("sqlalchemy.url", DATABASE_URL)
 
 # Interpret the config file for Python logging.
 if config.config_file_name is not None:

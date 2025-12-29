@@ -62,15 +62,19 @@ docker compose logs -f worker
 docker compose logs -f beat
 ```
 
-### 3. Run Database Migrations
+### 3. Run Database Migrations ⚠️ REQUIRED
+
+**IMPORTANT**: You must run migrations before the bot can work properly!
 
 ```bash
-# Run migrations
+# Run migrations (required step!)
 docker compose exec bot alembic upgrade head
 
 # Or if alembic is installed locally
 alembic upgrade head
 ```
+
+**Note**: If you see errors like "relation 'users' does not exist", it means migrations haven't been run yet. Run the command above.
 
 ### 4. Verify Services
 

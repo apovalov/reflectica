@@ -16,7 +16,7 @@ from app.storage.minio_client import MinIOClient
 from app.tasks.processing import analyze_face_task, ocr_handwriting_task, transcribe_audio_task
 from app.utils.file_utils import download_file_to_temp, get_file_extension
 from app.utils.logging import logger
-from app.utils.timezone import get_user_timezone, get_local_date
+from app.utils.timezone import get_user_timezone, get_local_date, utc_to_local
 from app.bot.keyboards import get_event_type_keyboard
 
 router = Router()
@@ -261,7 +261,11 @@ async def cmd_export_week(message: Message):
                 current_date = event.local_date
                 lines.append(f"\n## {current_date}\n")
 
-            lines.append(f"### {event.event_type.capitalize()} ({event.source_type})")
+            # Convert UTC time to local time for display
+            local_dt = utc_to_local(event.created_at_utc, user_tz)
+            time_str = local_dt.strftime("%H:%M")
+
+            lines.append(f"### {event.event_type.capitalize()} ({event.source_type}) - {time_str}")
             if event.text_content:
                 lines.append(f"{event.text_content}\n")
             else:
