@@ -10,6 +10,9 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
+# Create non-root user for Celery
+RUN useradd -m -u 1000 celeryuser
+
 # Copy dependency files
 COPY pyproject.toml ./
 
@@ -21,9 +24,13 @@ COPY app/ ./app/
 COPY alembic/ ./alembic/
 COPY alembic.ini ./
 
-# Create temp directory
-RUN mkdir -p /app/temp
+# Create temp directory and set ownership
+RUN mkdir -p /app/temp && \
+    chown -R celeryuser:celeryuser /app
 
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
+
+# Switch to non-root user
+USER celeryuser
 

@@ -12,9 +12,10 @@ from aiogram.types import CallbackQuery, Message, PhotoSize, Voice
 
 from app.db.models import Event, User
 from app.db.session import get_session
+from app.gemini.client import GeminiClient
 from app.storage.minio_client import MinIOClient
 from app.tasks.processing import analyze_face_task, ocr_handwriting_task, transcribe_audio_task
-from app.utils.file_utils import download_file_to_temp, get_file_extension
+from app.utils.file_utils import download_file_to_temp, get_file_extension, auto_rotate_image
 from app.utils.logging import logger
 from app.utils.timezone import get_user_timezone, get_local_date, utc_to_local
 from app.bot.keyboards import get_event_type_keyboard
@@ -137,9 +138,10 @@ async def cmd_help(message: Message):
         "/status - Show today's completion status\n"
         "/export_week - Export last 7 days summary\n\n"
         "<b>Usage:</b>\n"
-        "1. Use a command to set the type\n"
-        "2. Send your text/voice/photo\n"
-        "Or just send content and choose type from menu."
+        "✨ <b>Auto-classification:</b> Just send text/photo/voice and the bot will automatically detect the type!\n"
+        "📝 Or use commands (/reflection, /dream, etc.) to set the type before sending.\n"
+        "🖼️ For photos: Auto-detects handwriting (mindform), face photos, or drawings.\n"
+        "💬 For text: Auto-detects reflection, dream, or other types."
     )
     await message.answer(help_text, parse_mode="HTML")
 
@@ -287,10 +289,20 @@ async def callback_set_type(callback: CallbackQuery):
 
     set_pending_type(callback.from_user.id, event_type)
     await callback.answer(f"Type set to {event_type}")
-    await callback.message.edit_text(
-        f"✅ Type set to <b>{event_type}</b>. Please send your content again.",
-        parse_mode="HTML",
-    )
+
+    # Check if this is a confirmation after auto-classification
+    # If the message contains "I think this is", it's an auto-classification confirmation
+    if "I think this is" in callback.message.text or "Analyzing" in callback.message.text:
+        await callback.message.edit_text(
+            f"✅ Confirmed as <b>{event_type}</b>!\n"
+            f"Please send your content again to save it.",
+            parse_mode="HTML",
+        )
+    else:
+        await callback.message.edit_text(
+            f"✅ Type set to <b>{event_type}</b>. Please send your content now.",
+            parse_mode="HTML",
+        )
 
 
 @router.callback_query(F.data.startswith("add_"))
@@ -311,12 +323,32 @@ async def handle_text(message: Message):
     pending_type = get_pending_type(message.from_user.id)
 
     if not pending_type:
-        # Show type selection keyboard
-        await message.answer(
-            "What type of entry is this?",
-            reply_markup=get_event_type_keyboard(),
-        )
-        return
+        # Auto-classify the text
+        try:
+            await message.answer("🤔 Analyzing content...", parse_mode="HTML")
+            gemini = GeminiClient()
+            classification = gemini.classify_text_content(message.text)
+            pending_type = classification["event_type"]
+
+            # If confidence is low or it's "other", ask for confirmation
+            if classification["confidence"] < 0.6 or pending_type == "other":
+                await message.answer(
+                    f"I think this is a <b>{pending_type}</b> (confidence: {classification['confidence']:.0%}).\n"
+                    f"Is this correct?",
+                    reply_markup=get_event_type_keyboard(),
+                    parse_mode="HTML",
+                )
+                # Store the auto-detected type so if user confirms, we use it
+                set_pending_type(message.from_user.id, pending_type)
+                return
+        except Exception as e:
+            logger.error(f"Error in auto-classification: {e}")
+            # Fallback to asking user
+            await message.answer(
+                "What type of entry is this?",
+                reply_markup=get_event_type_keyboard(),
+            )
+            return
 
     # Create event
     event = await create_event_from_message(
@@ -336,11 +368,14 @@ async def handle_voice(message: Message):
     pending_type = get_pending_type(message.from_user.id)
 
     if not pending_type:
+        # For voice, default to reflection (most common) but allow override
+        # We could transcribe first and classify, but that's slower
+        # For now, default to reflection
+        pending_type = "reflection"
         await message.answer(
-            "What type of entry is this?",
-            reply_markup=get_event_type_keyboard(),
+            f"🎤 Auto-detected as <b>reflection</b>. If this is wrong, use /dream, /drawing, etc. before sending.",
+            parse_mode="HTML",
         )
-        return
 
     try:
         # Download voice file using message's bot
@@ -407,11 +442,48 @@ async def handle_photo(message: Message):
     pending_type = get_pending_type(message.from_user.id)
 
     if not pending_type:
-        await message.answer(
-            "What type of entry is this?",
-            reply_markup=get_event_type_keyboard(),
-        )
-        return
+        # Auto-classify the image
+        try:
+            await message.answer("🤔 Analyzing image...", parse_mode="HTML")
+
+            # Get largest photo
+            photo: PhotoSize = max(message.photo, key=lambda p: p.file_size)
+
+            # Download photo temporarily for classification
+            file = await message.bot.get_file(photo.file_id)
+            file_content = await message.bot.download_file(file.file_path)
+            temp_file = download_file_to_temp(f"classify_{photo.file_id}.jpg", file_content.read())
+
+            # Auto-rotate if needed
+            temp_file = auto_rotate_image(temp_file)
+
+            # Classify
+            gemini = GeminiClient()
+            classification = gemini.classify_image(temp_file)
+            pending_type = classification["event_type"]
+
+            # Cleanup temp file
+            if temp_file.exists():
+                temp_file.unlink()
+
+            # If confidence is low, ask for confirmation
+            if classification["confidence"] < 0.6:
+                await message.answer(
+                    f"I think this is a <b>{pending_type}</b> (confidence: {classification['confidence']:.0%}).\n"
+                    f"Is this correct?",
+                    reply_markup=get_event_type_keyboard(),
+                    parse_mode="HTML",
+                )
+                set_pending_type(message.from_user.id, pending_type)
+                return
+        except Exception as e:
+            logger.error(f"Error in image auto-classification: {e}")
+            # Fallback to asking user
+            await message.answer(
+                "What type of entry is this?",
+                reply_markup=get_event_type_keyboard(),
+            )
+            return
 
     try:
         # Get largest photo

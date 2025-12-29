@@ -20,6 +20,7 @@ celery_app.conf.update(
     task_track_started=True,
     task_time_limit=300,  # 5 minutes
     task_soft_time_limit=240,  # 4 minutes
+    broker_connection_retry_on_startup=True,  # Fix deprecation warning
 )
 
 # Import tasks and beat schedule after celery_app is created

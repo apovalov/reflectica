@@ -171,11 +171,31 @@ Important: if the face is not clearly visible, return low confidence and explain
 
             # Parse JSON response
             result_text = response.text
-            result = json.loads(result_text)
+            parsed = json.loads(result_text)
 
-            # Validate structure
+            # Handle case where Gemini returns a list instead of dict
+            if isinstance(parsed, list):
+                if len(parsed) > 0 and isinstance(parsed[0], dict):
+                    result = parsed[0]
+                else:
+                    logger.warning(f"Face analysis returned unexpected list format: {parsed}")
+                    result = {}
+            elif isinstance(parsed, dict):
+                result = parsed
+            else:
+                logger.warning(f"Face analysis returned unexpected type: {type(parsed)}")
+                result = {}
+
+            # Validate structure with defaults
             if "dominant_emotion" not in result:
-                raise ValueError("Missing 'dominant_emotion' field in face analysis response")
+                logger.warning(f"Face analysis response missing 'dominant_emotion': {result}")
+                result["dominant_emotion"] = "neutral"
+            if "stress_level_0_10" not in result:
+                result["stress_level_0_10"] = 5
+            if "confidence" not in result:
+                result["confidence"] = 0.3
+            if "notes" not in result:
+                result["notes"] = "Response format incomplete"
 
             return result
 
@@ -217,4 +237,123 @@ Important: if the face is not clearly visible, return low confidence and explain
         except Exception as e:
             logger.error(f"Retry failed: {e}")
             raise ValueError(f"Failed to get valid JSON response from Gemini: {e}")
+
+    def classify_text_content(self, text: str) -> dict[str, Any]:
+        """Classify text content to determine event type."""
+        try:
+            system_instruction = (
+                "You are a content classifier for a personal diary. Return only valid JSON."
+            )
+            user_prompt = f"""Analyze this diary entry text and classify it into one of these categories:
+- reflection: Daily thoughts, reflections, feelings, experiences, general diary entries
+- dream: Dreams, dream descriptions, sleep experiences
+- mindform: Handwritten notes (but this is text, so unlikely - only if explicitly about handwriting)
+- drawing: Descriptions of drawings or art
+- other: Anything else
+
+Text to classify:
+{text}
+
+Return JSON:
+{{
+  "event_type": "reflection|dream|mindform|drawing|other",
+  "confidence": 0.0-1.0,
+  "reasoning": "brief explanation"
+}}"""
+
+            parts = [Part.from_text(text=user_prompt)]
+
+            response = self.client.models.generate_content(
+                model="gemini-2.0-flash-exp",
+                contents=parts,
+                config=GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    temperature=0.1,
+                    response_mime_type="application/json",
+                ),
+            )
+
+            result_text = response.text
+            result = json.loads(result_text)
+
+            # Validate and normalize
+            event_type = result.get("event_type", "reflection")
+            # Map to valid types
+            valid_types = ["reflection", "dream", "mindform", "drawing", "other"]
+            if event_type not in valid_types:
+                event_type = "reflection"  # Default fallback
+
+            return {
+                "event_type": event_type,
+                "confidence": result.get("confidence", 0.5),
+                "reasoning": result.get("reasoning", ""),
+            }
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON from classification: {e}")
+            # Default to reflection
+            return {"event_type": "reflection", "confidence": 0.3, "reasoning": "Classification failed"}
+        except Exception as e:
+            logger.error(f"Error classifying text: {e}")
+            return {"event_type": "reflection", "confidence": 0.3, "reasoning": "Classification error"}
+
+    def classify_image(self, image_path: Path) -> dict[str, Any]:
+        """Classify image to determine if it's handwriting, face, or drawing."""
+        try:
+            # Read image file
+            with open(image_path, "rb") as f:
+                image_data = f.read()
+
+            system_instruction = (
+                "You are an image classifier for a personal diary. Return only valid JSON."
+            )
+            user_prompt = """Analyze this image and classify it into one of these categories:
+- mindform: Handwritten text, notes, journal entries (text written by hand)
+- face_photo: A clear photo of a person's face
+- drawing: Drawings, sketches, artwork, illustrations
+- other: Anything else
+
+Return JSON:
+{
+  "event_type": "mindform|face_photo|drawing|other",
+  "confidence": 0.0-1.0,
+  "reasoning": "brief explanation"
+}"""
+
+            parts = [
+                Part.from_bytes(data=image_data, mime_type="image/jpeg"),
+                Part.from_text(text=user_prompt),
+            ]
+
+            response = self.client.models.generate_content(
+                model="gemini-2.0-flash-exp",
+                contents=parts,
+                config=GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    temperature=0.1,
+                    response_mime_type="application/json",
+                ),
+            )
+
+            result_text = response.text
+            result = json.loads(result_text)
+
+            # Validate and normalize
+            event_type = result.get("event_type", "other")
+            valid_types = ["mindform", "face_photo", "drawing", "other"]
+            if event_type not in valid_types:
+                event_type = "other"  # Default fallback
+
+            return {
+                "event_type": event_type,
+                "confidence": result.get("confidence", 0.5),
+                "reasoning": result.get("reasoning", ""),
+            }
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON from image classification: {e}")
+            return {"event_type": "other", "confidence": 0.3, "reasoning": "Classification failed"}
+        except Exception as e:
+            logger.error(f"Error classifying image: {e}")
+            return {"event_type": "other", "confidence": 0.3, "reasoning": "Classification error"}
 

@@ -168,12 +168,23 @@ def analyze_face_task(event_id: str):
         gemini = GeminiClient()
         result = gemini.analyze_face(temp_file)
 
+        # Create human-readable text summary
+        emotion = result.get("dominant_emotion", "unknown")
+        stress = result.get("stress_level_0_10", 5)
+        confidence = result.get("confidence", 0.0)
+        notes = result.get("notes", "")
+
+        text_summary = f"Emotion: {emotion}\nStress level: {stress}/10\nConfidence: {confidence:.0%}"
+        if notes:
+            text_summary += f"\nNotes: {notes}"
+
         # Update event
+        event.text_content = text_summary
         event.derived_meta = {
-            "dominant_emotion": result.get("dominant_emotion"),
-            "stress_level_0_10": result.get("stress_level_0_10"),
-            "confidence": result.get("confidence"),
-            "notes": result.get("notes"),
+            "dominant_emotion": emotion,
+            "stress_level_0_10": stress,
+            "confidence": confidence,
+            "notes": notes,
         }
         event.processing_status = "ok"
         session.commit()
