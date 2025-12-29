@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import redis
 from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, Message, PhotoSize, Voice
+from aiogram.types import BufferedInputFile, CallbackQuery, Message, PhotoSize, Voice
 
 from app.db.models import Event, User
 from app.db.session import get_session
@@ -23,6 +23,7 @@ from app.bot.entry_summary import send_entry_summary
 from app.bot.keyboards import get_event_type_keyboard
 
 router = Router()
+TELEGRAM_MESSAGE_LIMIT = 4000
 
 # Redis for pending type storage
 redis_client = redis.from_url(os.environ.get("REDIS_URL", "redis://redis:6379/0"))
@@ -303,7 +304,13 @@ async def cmd_export_week(message: Message):
                 lines.append("*Processing...*\n")
 
         summary = "\n".join(lines)
-        await message.answer(f"<pre>{summary}</pre>", parse_mode="HTML")
+        if len(summary) <= TELEGRAM_MESSAGE_LIMIT:
+            await message.answer(f"<pre>{summary}</pre>", parse_mode="HTML")
+        else:
+            await message.answer_document(
+                document=BufferedInputFile(summary.encode("utf-8"), filename="week_summary.txt"),
+                caption="Mindforms Diary - Week Summary",
+            )
     finally:
         session.close()
 
