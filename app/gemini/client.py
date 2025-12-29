@@ -58,11 +58,29 @@ Return JSON:
 
             # Parse JSON response
             result_text = response.text
-            result = json.loads(result_text)
+            parsed = json.loads(result_text)
 
-            # Validate structure
+            # Handle case where Gemini returns a list instead of dict
+            if isinstance(parsed, list):
+                if len(parsed) > 0 and isinstance(parsed[0], dict):
+                    result = parsed[0]
+                else:
+                    logger.warning(f"Transcription returned unexpected list format: {parsed}")
+                    result = {}
+            elif isinstance(parsed, dict):
+                result = parsed
+            else:
+                logger.warning(f"Transcription returned unexpected type: {type(parsed)}")
+                result = {}
+
+            # Validate structure with defaults
             if "text" not in result:
-                raise ValueError("Missing 'text' field in transcription response")
+                logger.warning(f"Transcription response missing 'text': {result}")
+                result["text"] = "[Transcription failed]"
+            if "language" not in result:
+                result["language"] = "unknown"
+            if "segments" not in result:
+                result["segments"] = []
 
             return result
 
@@ -114,11 +132,37 @@ Return JSON:
 
             # Parse JSON response
             result_text = response.text
-            result = json.loads(result_text)
+            parsed = json.loads(result_text)
 
-            # Validate structure
+            # Handle case where Gemini returns a list instead of dict
+            if isinstance(parsed, list):
+                if len(parsed) > 0 and isinstance(parsed[0], dict):
+                    result = parsed[0]
+                else:
+                    logger.warning(f"OCR returned unexpected list format: {parsed}")
+                    result = {}
+            elif isinstance(parsed, dict):
+                result = parsed
+            else:
+                logger.warning(f"OCR returned unexpected type: {type(parsed)}")
+                result = {}
+
+            # Validate structure with defaults
             if "cleaned_text" not in result:
-                raise ValueError("Missing 'cleaned_text' field in OCR response")
+                logger.warning(f"OCR response missing 'cleaned_text': {result}")
+                # Try to use raw_text if available
+                if "raw_text" in result:
+                    result["cleaned_text"] = result["raw_text"]
+                else:
+                    result["cleaned_text"] = "[OCR failed to extract text]"
+            if "raw_text" not in result:
+                result["raw_text"] = result.get("cleaned_text", "")
+            if "language" not in result:
+                result["language"] = "unknown"
+            if "confidence" not in result:
+                result["confidence"] = 0.3
+            if "notes" not in result:
+                result["notes"] = "Response format incomplete"
 
             return result
 
