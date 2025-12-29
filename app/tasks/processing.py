@@ -1,7 +1,9 @@
 """Celery tasks for processing events."""
+import asyncio
 import uuid
 from pathlib import Path
 
+from app.bot.entry_summary import send_entry_summary
 from app.db.models import Event
 from app.db.session import get_session
 from app.gemini.client import GeminiClient
@@ -51,6 +53,10 @@ def transcribe_audio_task(event_id: str):
         session.commit()
 
         logger.info(f"Successfully transcribed event {event_id}")
+        try:
+            asyncio.run(send_entry_summary(str(event.id)))
+        except Exception as exc:
+            logger.error("Failed to send entry summary for %s: %s", event_id, exc)
 
     except Exception as e:
         logger.error(f"Error processing audio event {event_id}: {e}", exc_info=True)
@@ -116,6 +122,10 @@ def ocr_handwriting_task(event_id: str):
         session.commit()
 
         logger.info(f"Successfully OCR'd event {event_id}")
+        try:
+            asyncio.run(send_entry_summary(str(event.id)))
+        except Exception as exc:
+            logger.error("Failed to send entry summary for %s: %s", event_id, exc)
 
     except Exception as e:
         logger.error(f"Error processing OCR event {event_id}: {e}", exc_info=True)
@@ -190,6 +200,10 @@ def analyze_face_task(event_id: str):
         session.commit()
 
         logger.info(f"Successfully analyzed face for event {event_id}")
+        try:
+            asyncio.run(send_entry_summary(str(event.id)))
+        except Exception as exc:
+            logger.error("Failed to send entry summary for %s: %s", event_id, exc)
 
     except Exception as e:
         logger.error(f"Error processing face analysis event {event_id}: {e}", exc_info=True)
@@ -207,4 +221,3 @@ def analyze_face_task(event_id: str):
             temp_file.unlink()
         if session:
             session.close()
-

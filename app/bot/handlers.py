@@ -19,6 +19,7 @@ from app.tasks.processing import analyze_face_task, ocr_handwriting_task, transc
 from app.utils.file_utils import download_file_to_temp, get_file_extension, auto_rotate_image
 from app.utils.logging import logger
 from app.utils.timezone import get_user_timezone, get_local_date, utc_to_local
+from app.bot.entry_summary import send_entry_summary
 from app.bot.keyboards import get_event_type_keyboard
 
 router = Router()
@@ -480,6 +481,10 @@ async def handle_text(message: Message):
         f"✅ Saved as <b>{pending_type}</b>!\n\n{message.text}",
         parse_mode="HTML",
     )
+    try:
+        await send_entry_summary(str(event.id))
+    except Exception as exc:  # pragma: no cover - best-effort notification
+        logger.error("Failed to send entry summary after text entry %s: %s", event.id, exc)
 
 
 @router.message(F.voice)
@@ -690,4 +695,3 @@ async def handle_photo(message: Message):
     except Exception as e:
         logger.error(f"Error handling photo: {e}", exc_info=True)
         await message.answer("❌ Error processing photo. Please try again.")
-
