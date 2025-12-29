@@ -2,6 +2,7 @@
 import asyncio
 import uuid
 from pathlib import Path
+from typing import Any
 
 from app.bot.entry_summary import send_entry_summary
 from app.db.models import Event
@@ -44,11 +45,31 @@ def transcribe_audio_task(event_id: str):
         result = gemini.transcribe_audio(temp_file, event.raw_file_mime or "audio/ogg")
 
         # Update event
-        event.text_content = result.get("text", "")
-        event.derived_meta = {
+        transcription_text = result.get("text", "")
+        classification_result = None
+        if transcription_text.strip():
+            try:
+                classification_result = gemini.classify_text_content(transcription_text)
+                new_type = classification_result.get("event_type")
+                if new_type:
+                    event.event_type = new_type
+            except Exception as exc:
+                logger.error(
+                    "Error classifying transcribed text for %s: %s",
+                    event_id,
+                    exc,
+                    exc_info=True,
+                )
+
+        derived_meta: dict[str, Any] = {
             "language": result.get("language"),
             "segments": result.get("segments", []),
         }
+        if classification_result:
+            derived_meta["classification"] = classification_result
+
+        event.text_content = transcription_text
+        event.derived_meta = derived_meta
         event.processing_status = "ok"
         session.commit()
 

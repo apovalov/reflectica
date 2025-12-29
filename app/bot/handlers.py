@@ -493,14 +493,9 @@ async def handle_voice(message: Message):
     pending_type = get_pending_type(message.from_user.id)
 
     if not pending_type:
-        # For voice, default to reflection (most common) but allow override
-        # We could transcribe first and classify, but that's slower
-        # For now, default to reflection
+        # For voice, default to reflection (most common) but allow override.
+        # Transcription task will re-classify based on content afterwards.
         pending_type = "reflection"
-        await message.answer(
-            f"🎤 Auto-detected as <b>reflection</b>. If this is wrong, use /dream, /drawing, etc. before sending.",
-            parse_mode="HTML",
-        )
 
     try:
         # Download voice file using message's bot
@@ -545,8 +540,8 @@ async def handle_voice(message: Message):
             transcribe_audio_task.delay(str(event.id))
 
             await message.answer(
-                f"✅ Voice saved as <b>{pending_type}</b>!\n"
-                f"🔄 Transcribing...",
+                "✅ Voice saved!\n"
+                "🔄 Transcribing and determining the type...",
                 parse_mode="HTML",
             )
         finally:
