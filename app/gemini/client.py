@@ -380,7 +380,15 @@ Return JSON:
             )
 
             result_text = response.text
-            result = json.loads(result_text)
+            parsed = json.loads(result_text)
+
+            if isinstance(parsed, list):
+                result = next((item for item in parsed if isinstance(item, dict)), {})
+            elif isinstance(parsed, dict):
+                result = parsed
+            else:
+                logger.warning(f"Image classification returned unexpected type: {type(parsed)}")
+                result = {}
 
             # Validate and normalize
             event_type = result.get("event_type", "other")
@@ -400,4 +408,3 @@ Return JSON:
         except Exception as e:
             logger.error(f"Error classifying image: {e}")
             return {"event_type": "other", "confidence": 0.3, "reasoning": "Classification error"}
-
