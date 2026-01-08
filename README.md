@@ -22,7 +22,7 @@ A multimodal diary Telegram bot that stores text, voice, and photo entries with 
 - **Storage**: MinIO (S3-compatible) via boto3
 - **Queue**: Celery + Redis
 - **Scheduler**: Celery Beat
-- **AI**: Google Gemini API (gemini-2.0-flash-exp for STT, OCR, face analysis)
+- **AI**: Google Gemini API (gemini-2.5-flash for STT, OCR, face analysis)
 
 ## Prerequisites
 

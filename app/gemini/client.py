@@ -47,7 +47,7 @@ Return JSON:
 
             # Generate content with fast model
             response = self.client.models.generate_content(
-                model="gemini-2.0-flash-exp",
+                model="gemini-2.5-flash",
                 contents=parts,
                 config=GenerateContentConfig(
                     system_instruction=system_instruction,
@@ -87,7 +87,18 @@ Return JSON:
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse JSON from Gemini: {e}")
             # Retry with repair prompt
-            return self._retry_with_repair(audio_path, mime_type, "transcribe")
+            try:
+                result = self._retry_with_repair(audio_path, mime_type, "transcribe")
+                if "text" not in result:
+                    result["text"] = "[Transcription failed]"
+                if "language" not in result:
+                    result["language"] = "unknown"
+                if "segments" not in result:
+                    result["segments"] = []
+                return result
+            except ValueError as retry_error:
+                logger.error(f"Retry failed: {retry_error}")
+                return {"language": "unknown", "text": "[Transcription failed]", "segments": []}
         except Exception as e:
             logger.error(f"Error transcribing audio: {e}")
             raise
@@ -121,7 +132,7 @@ Return JSON:
 
             # Generate content with pro model
             response = self.client.models.generate_content(
-                model="gemini-2.0-flash-exp",
+                model="gemini-3-pro-preview", #gemini-2.5-flash
                 contents=parts,
                 config=GenerateContentConfig(
                     system_instruction=system_instruction,
@@ -204,7 +215,7 @@ Important: if the face is not clearly visible, return low confidence and explain
 
             # Generate content with pro model
             response = self.client.models.generate_content(
-                model="gemini-2.0-flash-exp",
+                model="gemini-2.5-flash",
                 contents=parts,
                 config=GenerateContentConfig(
                     system_instruction=system_instruction,
@@ -269,7 +280,7 @@ Important: if the face is not clearly visible, return low confidence and explain
 
         try:
             response = self.client.models.generate_content(
-                model="gemini-2.0-flash-exp",
+                model="gemini-2.5-flash",
                 contents=parts,
                 config=GenerateContentConfig(
                     temperature=0.1,
@@ -277,7 +288,15 @@ Important: if the face is not clearly visible, return low confidence and explain
                 ),
             )
             result_text = response.text
-            return json.loads(result_text)
+            try:
+                return json.loads(result_text)
+            except json.JSONDecodeError:
+                # Attempt to salvage a JSON object embedded in the response.
+                start = result_text.find("{")
+                end = result_text.rfind("}")
+                if start != -1 and end != -1 and end > start:
+                    return json.loads(result_text[start : end + 1])
+                raise
         except Exception as e:
             logger.error(f"Retry failed: {e}")
             raise ValueError(f"Failed to get valid JSON response from Gemini: {e}")
@@ -308,7 +327,7 @@ Return JSON:
             parts = [Part.from_text(text=user_prompt)]
 
             response = self.client.models.generate_content(
-                model="gemini-2.0-flash-exp",
+                model="gemini-2.5-flash",
                 contents=parts,
                 config=GenerateContentConfig(
                     system_instruction=system_instruction,
@@ -370,7 +389,7 @@ Return JSON:
             ]
 
             response = self.client.models.generate_content(
-                model="gemini-2.0-flash-exp",
+                model="gemini-2.5-flash",
                 contents=parts,
                 config=GenerateContentConfig(
                     system_instruction=system_instruction,
